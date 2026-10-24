@@ -1,19 +1,55 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "harmonic-llm"
 version = "0.3.0"
-authors = [
-  { name="aifeifei798" },
-]
 description = "Acoustic Dynamic Resonance Suppression and Harmonic Wave-Shaping for Transformer Latent Manifolds."
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = [
-    "torch>=2.0.0",
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+  { name = "aifeifei798", email = "aifeifei798@gmail.com" },
 ]
+keywords = [
+  "llm",
+  "transformer",
+  "attention",
+  "activation-outliers",
+  "dct",
+  "dsp",
+  "quantization",
+  "pytorch",
+  "interpretability",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["build>=1.0", "twine>=5.0"]
+
+[project.urls]
+Homepage = "https://github.com/aifeifei798/Harmonic-LLM"
+Repository = "https://github.com/aifeifei798/Harmonic-LLM"
+Issues = "https://github.com/aifeifei798/Harmonic-LLM/issues"
+
+[tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]

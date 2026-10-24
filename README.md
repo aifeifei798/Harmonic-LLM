@@ -49,7 +49,7 @@ Existing solutions like **QK-Norm (RMSNorm)** act as crude, global volume knobsâ
 We instrumented a 48-layer live diagnostic probe tracking $3,072$ layer-step forward executions ($48\text{ layers} \times 64\text{ generation steps}$) on an unquantized 12B model, measuring both the raw baseline and `harmonic-llm` in real-time.
 
 <p align="center">
-  <img src="doc/harmonic_package_verification.png" alt="Harmonic-LLM Spectral Verification" width="100%">
+  <img src="https://raw.githubusercontent.com/aifeifei798/Harmonic-LLM/main/doc/harmonic_package_verification.png" alt="Harmonic-LLM Spectral Verification" width="100%">
   <br>
   <em>Figure 1: Live quad-panel diagnostic comparing Native Unpatched Base vs. Harmonic-LLM active filtering under a deliberately aggressive stress-test setting (<code>threshold=1.85</code>, <code>steepness=5.0</code>) that force-opens the gate so the attenuation becomes measurable in the spectrum.</em>
 </p>
