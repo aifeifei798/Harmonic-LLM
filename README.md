@@ -1,323 +1,292 @@
 <div align="center">
 
-# 🎛️ Harmonic-LLM
-### Acoustic Dynamic Resonance Suppression & Wave-Shaping for Transformer Latent Manifolds
+# Harmonic-LLM
+
+### Training-free amplitude outlier suppression for Transformer Q/O projections
 
 [![PyPI version](https://img.shields.io/pypi/v/harmonic-llm.svg?color=blue)](https://pypi.org/project/harmonic-llm/)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Framework](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C.svg)](https://pytorch.org/)
-[![Hardware](https://img.shields.io/badge/Accelerated-NVIDIA_RTX_5090_D-76B900.svg)](https://www.nvidia.com/)
-
-*What if an LLM's latent space isn't an abstract black box, but a continuous acoustic signal stream?*  
-**Harmonic-LLM brings mastering-grade dynamic audio equalization (FabFilter Pro-Q 3) and orthogonal transform coding (JPEG 1D-DCT) directly into the $Q$ and $O$ attention projections of Transformers.**
-
-[Key Innovations](#-the-core-thesis-why-signal-processing-for-transformers) •
-[Empirical Proof](#-empirical-spectral-verification) •
-[Quickstart](#-quickstart) •
-[Tuning `threshold` / `steepness`](#tuning-guide) •
-[Mathematical Core](#-mathematical-formulation) •
-[Zero-Shot Reasoning](#-zero-shot-empirical-benchmarks)
 
 </div>
 
 ---
 
-## 💡 The Core Thesis: Why Signal Processing for Transformers?
+## What this is
 
-Modern Transformers suffer from a well-known pathology: **extreme outlier activation spikes** (e.g., sporadic latent magnitudes exceeding normal bounds by $5\times$ to $10\times$). In standard attention mechanisms:
+A forward hook that caps extreme activation outliers at the `q_proj` and `o_proj`
+outputs of any Hugging Face Transformer. No weight changes, no training, no
+calibration data. It is a soft-knee limiter: it measures how far each channel
+block rises above the layer's typical scale, and scales down only the elements
+that exceed a high ceiling.
 
-$$\text{Attention}(Q, K, V) = \text{Softmax}\left(\frac{Q K^\top}{\sqrt{d_k}}\right) V$$
-
-When an unregularized spike detonates in the Query ($Q$) or Output ($O$) projection:
-
-1. It blinds the Softmax operator into an artificial **Attention Sink**, triggering hallucinations.
-2. It inflates logit entropy, forcing models to spawn thousands of speculative "Chain-of-Thought" tokens to resolve internal hesitation.
-
-Existing solutions like **QK-Norm (RMSNorm)** act as crude, global volume knobs—they divide the entire vector by its root-mean-square, inadvertently drowning subtle prompt constraints in the noise floor.
-
-**Harmonic-LLM introduces the Dynamic Latent Resonance Suppressor (DLRS):**
-
-* **$100\%$ Bitwise Transparent Bypass ($0.00\text{ dB}$ at rest)**: Healthy tokens and subtle constraints flow through untouched with zero phase shift and zero precision loss.
-* **Surgical Outlier Attenuation**: Only when a localized channel block experiences an abnormal energy burst does the sidechain detector trigger an instant, localized **8-band orthogonal DCT notch filter** via a Straight-Through Estimator (STE).
-* **Asymmetric $Q/O$ Targeting**: Memory coordinate systems ($K$ and $V$) remain untouched, while active cognitive routing ($Q$) and language synthesis ($O$) are conditioned onto an optimal gravitational manifold.
-
----
-
-## 🔬 Empirical Spectral Verification
-
-We instrumented a 48-layer live diagnostic probe tracking $3,072$ layer-step forward executions ($48\text{ layers} \times 64\text{ generation steps}$) on an unquantized 12B model, measuring both the raw baseline and `harmonic-llm` in real-time.
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/aifeifei798/Harmonic-LLM/main/doc/harmonic_package_verification.png" alt="Harmonic-LLM Spectral Verification" width="100%">
-  <br>
-  <em>Figure 1: Live quad-panel diagnostic comparing Native Unpatched Base vs. Harmonic-LLM active filtering under a deliberately aggressive stress-test setting (<code>threshold=1.85</code>, <code>steepness=5.0</code>) that force-opens the gate so the attenuation becomes measurable in the spectrum.</em>
-</p>
-
-### Key Physical Readouts from Figure 1
-
-1. **Physical Dynamic Gain Reduction (Top-Left)**:
-   When the crest threshold is set to catch outlier excursions, the **$Q$-projection power density (green line)** decouples from the unpatched baseline (red dashed line) and smoothly attenuates by **$\sim 0.06\text{ dB} \text{ to } 0.10\text{ dB}$ across all 8 harmonic orders**.
-2. **Outlier Spike Clamping (Bottom-Left)**:
-   In the unpatched base model (red), multiple isolated spike bursts erupt past $2.05$ (e.g., execution steps $\sim 1800, 2000, 2400$). Under `harmonic-llm` (blue), these pathological excursions are strictly bounded within a stable, well-behaved envelope.
-3. **High-Frequency Damping in Output Synthesis (Top-Right)**:
-   Upper harmonic orders ($5, 6, 7$) in the $O$-projection are physically regularized, suppressing conversational sibilance, formatting leaks, and markdown syntax artifacts.
-4. **The $2.2$ Natural Attractor Ceiling (Bottom-Right)**:
-   The periodic comb structure reveals the 48-layer heartbeat across all generated tokens, confirming that the model's natural crest ceiling hovers at $\approx 2.26$, precisely where our standard threshold ($2.2$) operates.
-
-> ⚠️ **Read this before copying `1.85 / 5.0`:** the figure above is a *diagnostic stress test*, not the recommended default. `1.85 / 5.0` opens the gate on a large fraction of blocks purely so that the spectral difference is visible. Production defaults are `threshold=2.2`, `steepness=3.0`. See [Tuning Guide](#tuning-guide).
-
----
-
-## ⚡ Quickstart
-
-Install `harmonic-llm` directly from PyPI or source:
-
-```bash
-pip install harmonic-llm
-# Or install in editable mode from source:
-git clone https://github.com/aifeifei798/Harmonic-LLM.git
-cd Harmonic-LLM
-pip install -e .
-```
-
-### Zero-Inference Hot-Patching (1 Line of Code)
-
-`harmonic-llm` is completely model-agnostic and non-invasive. You can inject dynamic resonance suppression into **any** Hugging Face Transformer (Gemma, LLaMA, Qwen, Mistral, DeepSeek) without retraining:
-
-```python
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from harmonic_llm import apply_harmonic_eq, remove_harmonic_eq, harmonic_status
-
-# 1. Load any off-the-shelf model
-model_id = "Qwen/Qwen2.5-7B-Instruct"
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.bfloat16, device_map="auto")
-
-# 2. Inject Harmonic Dynamic EQ (automatic Q/O targeting across all layers)
-#    threshold = crest-factor knee, steepness = soft-knee sharpness (both optional)
-apply_harmonic_eq(model, threshold=2.2, steepness=3.0)
-print(f"Active Channels Monitored: {harmonic_status()}")  # e.g., 56 or 96 channels
-
-# 3. Generate with active resonance suppression
-inputs = tokenizer("Explain the Nyquist-Shannon sampling theorem.", return_tensors="pt").to(model.device)
-with torch.no_grad():
-    outputs = model.generate(**inputs, max_new_tokens=128)
-
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))
-
-# 4. Remove hooks at any time to return to 100% stock base state
-remove_harmonic_eq(model)
-```
-
-Calling `apply_harmonic_eq` again automatically swaps the parameters — the old hooks are torn down first, so you can A/B different tunings inside one process without reloading weights.
-
----
-
-<a id="tuning-guide"></a>
-## 🎚️ Tuning Guide: `threshold` and `steepness`
-
-Both knobs live on the **sidechain detector**. They do not change model weights, do not require retraining, and are pure inference-time arguments of `apply_harmonic_eq(model, threshold=..., steepness=...)`.
-
-The whole operator is a **soft-knee compressor** applied per 8-channel macroblock:
-
-$$\gamma = \frac{\text{Peak}}{\text{RMS} + \epsilon}, \qquad \alpha_{\text{dyn}} = 0.90 \cdot \tanh\!\big(\beta \cdot \mathrm{ReLU}(\gamma - \theta)\big), \qquad X_{\text{out}} = (1-\alpha_{\text{dyn}})X + \alpha_{\text{dyn}}X_{\text{rec}}$$
-
-where $\theta$ = `threshold`, $\beta$ = `steepness`, and $X_{\text{rec}}$ is the DCT-quantized reconstruction of the same block.
-
-| Argument | Symbol | Default | Valid range | In one sentence |
-| :--- | :--- | :--- | :--- | :--- |
-| `threshold` | $\theta$ | `2.2` | `[1.0, 2.83]` | Crest factor at which the gate starts to open. |
-| `steepness` | $\beta$ | `3.0` | `(0, ~10]` | How hard the gate slams shut once it opens. |
-| `block_size` | — | `8` | `4 / 8 / 16` | DCT block length; changes the crest range, so retune $\theta$ if you touch it. |
-| `targets` | — | `("q_proj", "o_proj")` | any suffix tuple | Which attention projections to hook; leave as-is to keep $K/V$ untouched. |
-
-### 1. `threshold=2.2` — where the knee sits
-
-`threshold` is a **unitless crest-factor threshold**, evaluated per 8-channel block, not per token and not in percentage units.
-
-For an 8-element block the crest factor is mathematically bounded:
-
-$$\gamma \in \left[1,\ \sqrt{8}\right] \approx \left[1,\ 2.83\right]$$
-
-* $\gamma = 1$: perfectly flat block (all 8 channels equal).
-* $\gamma \approx 2.83$: a single channel carries all the energy — the pathological spike shape.
-
-That bound is the key to reading the parameter:
-
-* **$\theta \le 1.0$** → almost every block sits above the knee (and even a perfectly flat block is filtered once $\theta < 1$). This is no longer an EQ, it is a global low-pass on the latent space. Expect flattened vocabulary and dull reasoning.
-* **$\theta \ge 2.83$** → the gate can never open; the hook stays installed but is a $0.00\text{ dB}$ no-op. Useful as an ablation control.
-* **`2.2` (default)** → sits just below the empirically measured natural ceiling of a healthy 12B model ($\approx 2.26$ in Figure 1, bottom-right). Ordinary high-energy directions pass untouched; only genuine outlier bursts cross the knee. This is why the default is nearly free.
-* **`1.85` (Figure 1 setting)** → deliberately aggressive stress test. Blocks at $\gamma \approx 2.0$ already receive $\alpha_{\text{dyn}} \approx 0.57$, i.e. more than half of the block is replaced by its DCT reconstruction. Great for making attenuation measurable; too much for daily chat.
-
-Practical band: **`1.85 – 2.5`**. Below `~1.8` the gate starts catching ordinary attention-routing directions rather than pathologies, and output tends to become blander and less specific. Above `~2.4` the effect becomes rare and subtle — measurable, but seldom decisive.
-
-### 2. `steepness=3.0` — how hard the knee bites
-
-`steepness` is the $\beta$ multiplier inside the `tanh`, i.e. the **slope of the compression curve** past the knee. The gate is bounded by design, so $\alpha_{\text{dyn}} < 0.90$ always: at most $90\%$ of a block is replaced by the quantized reconstruction, and $10\%$ of the original signal always survives. That preserves gradient flow and keeps the STE well-behaved.
-
-* **Slope at the knee** is $0.90\,\beta$ per unit of crest overshoot: `2.7` at $\beta=3$, `4.5` at $\beta=5$.
-* **Knee width** (overshoot needed to reach ~76% of saturation) is roughly $1/\beta$: `0.33` crest units at $\beta=3$, `0.20` at $\beta=5$.
-* **Low $\beta$ (`1.0 – 2.0`)** → soft knee, gradual, "musical" compression. Smallest risk of discontinuities; preferred for creative writing and long-form prose.
-* **`3.0` (default)** → balanced. Strong enough to clamp real spikes, soft enough to avoid a binary on/off texture.
-* **High $\beta$ (`5.0 – 8.0`)** → hard-knee limiter. Snappy, decisive suppression of spike storms; the most aggressive useful setting.
-* **$\beta \to 0$** → gate disabled ($\alpha \equiv 0$). **$\beta < 0$ is invalid**: the `tanh` flips sign and the blend turns into amplification. Keep it positive.
-
-### Gate response: $\alpha_{\text{dyn}}$ as a function of crest factor
-
-| Crest $\gamma$ | `2.2 / 3.0` (default) | `1.85 / 5.0` (Figure 1) | `2.0 / 4.0` | `2.3 / 2.5` (precision-safe) |
-| :--- | :--- | :--- | :--- | :--- |
-| 1.85 | 0.000 | 0.000 | 0.000 | 0.000 |
-| 2.00 | 0.000 | 0.572 | 0.000 | 0.000 |
-| 2.20 | 0.000 | 0.847 | 0.598 | 0.000 |
-| 2.26 | 0.160 | 0.871 | 0.700 | 0.000 |
-| 2.40 | 0.483 | 0.893 | 0.830 | 0.222 |
-| 2.60 | 0.750 | 0.899 | 0.885 | 0.525 |
-| 2.83 | 0.859 | 0.900 | 0.898 | 0.714 |
-
-Read it as "fraction of the block replaced by its DCT reconstruction". The default column is empty until $\gamma \approx 2.2$ and only reaches ~0.16 at the model's natural ceiling — that is the $0.00\text{ dB}$-at-rest claim in numbers.
-
-### Recommended presets
-
-| Scenario | `threshold` | `steepness` | Why |
-| :--- | :--- | :--- | :--- |
-| General chat / first deployment (default) | `2.2` | `3.0` | Knee just under the natural ceiling; near-transparent on healthy tokens. |
-| Long chain-of-thought, runaway hesitation tokens | `1.95 – 2.05` | `4.0 – 5.0` | Catches the mid-size bursts that inflate logit entropy instead of only extreme spikes. |
-| Spike storms / unstable small models | `2.0` | `4.0` | Hard-knee limiter; clamps repeated excursions without lowering $\theta$ too far. |
-| Code, math, structured output (minimal drift) | `2.30 – 2.45` | `2.0 – 3.0` | Fewest blocks touched; protects exact syntax and numeric literals. |
-| Creative / long-form writing | `2.25` | `1.5 – 2.0` | Softest knee, no audible switching texture. |
-| Diagnostic figure / benchmarking (Figure 1) | `1.85` | `5.0` | Force-open the gate so gain reduction is visible in the spectrum. |
-| Ablation control (hook installed, never fires) | `2.83` | any | Establishes the $0.00\text{ dB}$ reference. |
-
-### Calibration recipe (4 steps)
-
-1. **Baseline first.** Run your prompt set with `remove_harmonic_eq`, record outputs/seeds.
-2. **Start at the default** `threshold=2.2, steepness=3.0`. If the crest histogram you measure never reaches `2.2`, the hook is already a no-op for your model — lower $\theta$ before touching $\beta$.
-3. **Move $\theta$ in steps of `0.05`**, not `0.3`. Crest factor is a ratio, and the useful band is narrow (`1.85 – 2.5`).
-4. **Then shape with $\beta$.** Raise $\beta$ if spikes still break through; lower it if output feels mechanically smoothed or repetitive.
-
-Rules of thumb:
-
-* Symptom "still hallucinating on the same prompt" → lower $\theta$ by `0.05` first, raise $\beta$ only after.
-* Symptom "answers got generic / lost detail" → raise $\theta$ by `0.05 – 0.1`, drop $\beta$ to `2.0`.
-* Symptom "output oscillates between two styles" → lower $\beta$ (softer knee), keep $\theta$ the same.
-* If you change `block_size`, the crest ceiling becomes $\sqrt{n}$ where $n$ is the block length ($2.0$ for 4, $2.83$ for 8, $4.0$ for 16), so rescale $\theta$ accordingly.
-
-### Tuning in code
+The package is deliberately small and its claims are deliberately narrow. It
+does **not** claim to improve reasoning, reduce hallucination, or make a model
+faster. It claims one thing — *it measurably reduces the magnitude of the
+extreme tail, and here is exactly what that costs* — and it ships the harness
+that produced every number in this README.
 
 ```python
 from harmonic_llm import apply_harmonic_eq, remove_harmonic_eq
 
-# Conservative production default (near bit-exact)
-apply_harmonic_eq(model, threshold=2.2, steepness=3.0)
-
-# Aggressive: long CoT / spike storms
-apply_harmonic_eq(model, threshold=1.95, steepness=4.5)
-
-# Precision-safe: code & math
-apply_harmonic_eq(model, threshold=2.35, steepness=2.5)
-
-# A/B control: hook present but mathematically inert
-apply_harmonic_eq(model, threshold=2.83, steepness=3.0)
-```
-
-Every call prints the number of patched channels and the active settings, and re-injection replaces the previous configuration in place.
-
----
-
-## 🧮 Mathematical Formulation
-
-### 1. Crest Factor Sidechain Detector
-
-Activations $X \in \mathbb{R}^{B \times S \times D}$ are partitioned along the feature channel dimension into 8-dimensional macroblocks $X_{\text{blk}} \in \mathbb{R}^{\cdots \times N_{\text{blk}} \times 8}$:
-
-$$\text{Peak} = \max(|X_{\text{blk}}|), \quad \text{RMS} = \sqrt{\frac{1}{8} \sum_{i=1}^{8} x_i^2 + \epsilon}$$
-
-$$\gamma = \frac{\text{Peak}}{\text{RMS} + \epsilon} \quad (\text{Crest Factor})$$
-
-Because RMS is bounded by Peak, $\gamma \in [1, \sqrt{8}]$ for 8-channel blocks — the domain that gives `threshold` its meaning.
-
-### 2. Differentiable Soft Dynamic Gate
-
-When $\gamma \le \theta$ (`threshold`, default $2.2$), dynamic reduction is zero. When $\gamma > \theta$, the gate activates smoothly:
-
-$$\Delta\gamma = \mathrm{ReLU}(\gamma - \theta)$$
-
-$$\alpha_{\text{dyn}} = 0.90 \cdot \tanh(\beta \cdot \Delta\gamma) \quad (\beta = \text{steepness},\ \text{default } 3.0)$$
-
-* $\beta$ sets the knee slope ($0.90\beta$ at $\gamma = \theta$) and the knee width ($\approx 1/\beta$).
-* $\alpha_{\text{dyn}}$ is capped at $0.90$, so $10\%$ of the original block is always retained.
-
-### 3. Orthonormal 1D-DCT Type-II Transform Coding
-
-The macroblock is projected onto the discrete cosine frequency basis $M \in \mathbb{R}^{8 \times 8}$:
-
-$$M[j, n] = c_j \cos\left(\frac{\pi}{8} \left(n + \frac{1}{2}\right) j\right), \quad c_j = \begin{cases} \sqrt{1/8} & j = 0 \\ \sqrt{2/8} & j > 0 \end{cases}$$
-
-$$C = X_{\text{blk}} M^\top, \quad C_q = \mathrm{STEQuant}(C), \quad X_{\text{rec}} = C_q M$$
-
-### 4. Broadcasted Channel Blending
-
-$$X_{\text{out}} = (1 - \alpha_{\text{dyn}}) \cdot X_{\text{blk}} + \alpha_{\text{dyn}} \cdot X_{\text{rec}}$$
-
-* **Quiescent State ($\alpha_{\text{dyn}} = 0$):** $X_{\text{out}} \equiv X_{\text{blk}}$ (exact $0.00\text{ dB}$ bypass).
-* **Burst State ($\alpha_{\text{dyn}} > 0$):** outlier harmonics are clamped and redistributed into a slowly-varying subspace.
-
----
-
-## 🥊 Zero-Shot Empirical Benchmarks
-
-Trained with **Ghost Harmonic Guidance** on an RTX 5090 D and merged statically (`merge_and_unload`) into GGUF Q8_0, a 12B model equipped with Harmonic Q/O shaping exhibits unprecedented zero-shot cognitive performance:
-
-| Benchmark Challenge | Stock Base 12B | Harmonic-LLM 12B | Result Breakdown |
-| :--- | :--- | :--- | :--- |
-| **The Sally Sisters Logic Trap**<br>*(Negative deduction)* | ❌ **Failed (4 Sisters)**<br>Collapses into local semantic counting hallucination. | 🌟 **100% Passed (2 Sisters)**<br>Captures set-equivalence: *"the sisters are the same people"*. | **Zero-Shot Precision** |
-| **Nonlinear DSP Aliasing Math**<br>*(14 kHz tanh at 44.1 kHz)* | ⚠️ **Passed with 1,625 CoT tokens (20 s delay)**<br>Repeated scratchpad checks, unit typo (`Hz` vs `kHz`). | 🌟 **Instant Direct Pass (400 tokens / 4 s)**<br>Zero CoT needed. Exactly derives 3rd fold ($2.1\text{ kHz}$) and 5th double-wrap ($18.2\text{ kHz}$). | **$4\times$ Faster, $75\%$ Token Savings** |
-| **Distributed WAL Recovery**<br>*(Linux Page Cache vs NVMe Flush)* | *Generic high-level summary with format drift.* | 🌟 **Staff-Level Verdict**<br>Identifies `flusher threads`, `NIC TX rings`, and lack of global I/O-network priority order. | **Surgical Systems Insight** |
-| **Negative Formatting Constraints**<br>*(No Markdown backticks allowed)* | ❌ **Failed**<br>Stubbornly wraps output in fenced Python blocks. | 🌟 **100% Followed**<br>Pure executable text output without conversational fluff. | **Zero Markdown Leaks** |
-
----
-
-## 📂 Repository Layout
-
-```text
-Harmonic-LLM/
-├── harmonic_llm/
-│   ├── __init__.py        # Package exports (apply_harmonic_eq, remove_harmonic_eq)
-│   ├── core.py            # Orthonormal DCT-II, crest-factor gate, STE quantizer
-│   └── patch.py           # Universal Q/O attention forward-hook injector
-├── doc/
-│   └── harmonic_package_verification.png   # 4-panel spectral validation plot
-├── LICENSE
-├── pyproject.toml         # Modern packaging configuration
-└── README.md
+apply_harmonic_eq(model)          # threshold=64.0, steepness=3.0, alpha_max=1.0
+...                               # run the model as usual
+remove_harmonic_eq()              # stock model restored exactly
 ```
 
 ---
 
-## 📜 Lineage & Origins
+## Mechanism
 
-`Harmonic-LLM` emerged from an unexpected discovery during the development of [`flashcodec-kv`](https://github.com/aifeifei798/flashcodec), a research project exploring image-compression codecs for KV Cache storage. While storage-level KV quantization reached diminishing returns against native row-wise integer formats, an internal mechanism study revealed that **orthogonal transforms redistribute activation error into a slowly-varying subspace that Softmax barely penalizes**.
+For an activation tensor `x` reshaped into blocks of 8 channels:
 
-By pivoting the transform from **passive KV storage** into **active $Q/O$ representation wave-shaping**, `Harmonic-LLM` turned a storage negative result into a major capability breakthrough in reasoning and hallucination suppression.
+```
+ref    = median(block RMS)                      # robust per-tensor scale
+ratio  = block_peak / ref                       # amplitude outlier ratio
+alpha  = alpha_max * tanh(steepness * relu(ratio - threshold))
+limit  = threshold * ref
+gain_e = 1 - alpha * relu(1 - limit / |x_e|)
+x_e   <- x_e * gain_e
+```
+
+Three properties matter:
+
+* **Amplitude-aware.** `ratio` grows with the absolute size of a spike, so a
+  3-sigma bump and a 300-sigma blowup are not treated as the same event. A crest
+  factor (`peak/rms`) cannot do this: it is scale-invariant, so multiplying a
+  block by any constant leaves it unchanged. That is why this operator measures
+  magnitude, not shape.
+* **Bit-exact at rest.** A block below the knee gets `gain == 1` exactly, and
+  multiplying by 1.0 is exact. Healthy activations come back bit-for-bit
+  unchanged, including in bf16.
+* **Direction-aware.** Only elements above the ceiling are scaled, so a spike is
+  attenuated rather than smeared across its neighbours.
+
+The estimator is scale-equivariant: multiplying the whole tensor by a constant
+leaves `ratio` unchanged, so one threshold works across layers whose activation
+scales differ by orders of magnitude.
 
 ---
 
-## 🤝 Citation
+## Measured results
 
-If you find this signal-processing approach to Transformer latent manifolds useful in your research or production infrastructure, please cite:
+Model: `gemma-4-12B-it-qat-q4_0-unquantized` (48 layers, hidden 3840, 8 layers
+with double-width Q/O), greedy continuation of 64 tokens, all conditions
+teacher-forced on the **same token trajectory**, so every difference is
+attributable to the operator rather than to different generated text.
 
-```bibtex
-@software{feifei2026harmonicllm,
-  author = {Feifei},
-  title = {Harmonic-LLM: Acoustic Dynamic Resonance Suppression & Wave-Shaping for Transformer Latent Manifolds},
-  year = {2026},
-  publisher = {GitHub},
-  url = {https://github.com/aifeifei798/Harmonic-LLM}
-}
+### Where the outliers are
+
+`ratio = block peak / median block RMS`, over the whole sequence:
+
+| quantile | Q projection | O projection |
+| :--- | ---: | ---: |
+| p50 | 1.9 | 1.9 |
+| p90 | 4.0 | 5.0 |
+| p99 | 17.9 | 35.1 |
+| p99.9 | 28.0 | 59.2 |
+| max | 95.6 | 286.5 |
+
+The distribution is heavy-tailed but not sparse in the extreme: the p99.99 is
+already 36. A threshold in the 2–8 range (the previous default was 2.2) cuts
+into activations the model actively uses.
+
+### What the shipped default does
+
+Shipped default: `threshold=64.0`, `steepness=3.0`, `alpha_max=1.0`.
+
+| measurement | Q | O |
+| :--- | ---: | ---: |
+| blocks touched | 30 / 2,867,200 (0.001%) | 1,718 / 2,304,000 (0.07%) |
+| peak reduction, median | −21.2% | −15.8% |
+| peak reduction, 5th pct | −31.3% | −57.9% |
+| crest factor change | 0.000% | 0.000% |
+
+Crest factor is unchanged **by construction** (it is scale-invariant). That is
+not a failure of the operator; it is the reason the operator had to be
+amplitude-based in the first place.
+
+Cost, measured on the same run:
+
+| condition | NLL | KL(base‖cond) | tokens/s |
+| :--- | ---: | ---: | ---: |
+| base | 0.173 | 0 | 21.0 |
+| harmonic-llm | 0.293 | 0.092 | 15.0 (**0.71×**) |
+| sham: unconditional limiter | 0.290 | 0.092 | 12.9 |
+| sham: same block count, random blocks | 0.176 | 0.0015 | 11.2 |
+
+Two things this table says that are easy to miss:
+
+* The unconditional limiter costs the same as the gated one (KL 0.092 vs 0.092).
+  At this operating point the gate is nearly binary, so the *ceiling* does the
+  work, not the block selection. The random-block sham, which selects the same
+  number of blocks without regard to their content, costs 60× less — that is
+  the selectivity signal, and it is the opposite direction from what the
+  "surgical gate" story would predict.
+* The pass is not free: 0.71× throughput at batch 1, because it is a pointwise
+  traversal of every Q/O output.
+
+### The trade-off frontier (this is the real result)
+
+Sweep on the same model, `block` reference, one teacher-forced forward each.
+"depth" is the median peak reduction on touched blocks:
+
+| threshold | alpha_max | blocks touched | depth | KL | ΔNLL |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 1.0 | 3.9% | −40.5% | 14.0 | +14.1 |
+| 16 | 1.0 | 1.8% | −33.3% | 3.57 | +3.40 |
+| 32 | 1.0 | 0.5% | −20.8% | 0.59 | +0.57 |
+| 64 | 1.0 | 0.04% | −16.0% | 0.078 | +0.11 |
+| 32 | 0.25 | 0.5% | −5.4% | 0.015 | +0.02 |
+
+A second sweep asked whether the damage comes from *changing the shape* of a
+block (element-wise clamping) or from *reducing its amplitude* (one gain per
+block). At equal peak reduction the two are indistinguishable:
+
+| config | clamp KL | block-gain KL |
+| :--- | ---: | ---: |
+| threshold 16, alpha 1.0 | 3.565 | 3.477 |
+| threshold 32, alpha 1.0 | 0.588 | 0.548 |
+| threshold 64, alpha 1.0 | 0.078 | 0.079 |
+
+The honest reading: these outliers are load-bearing. Any operator that reduces
+their amplitude pays roughly in proportion to how much it reduces, and
+preserving the block shape does not buy anything back.
+
+---
+
+## Figures
+
+Both figures come from the same 12B run and are regenerated by
+`test_package_spectrum.py`.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/aifeifei798/Harmonic-LLM/main/doc/harmonic_package_verification.png" alt="amplitude response" width="100%">
+</p>
+
+*Top-left*: the tail magnitude (`p99 |x|`) per layer, base vs filtered. The two
+curves coincide except where the operator acts.
+*Top-right*: the block-ratio distribution for Q and O, with the shipped
+threshold. Q decays before 64; O keeps a tail out to ~300, which is exactly the
+part the operator removes.
+*Bottom-left*: every touched block, before vs after. Points below the dashed
+identity line are attenuated; 30 Q blocks (0.001%) and 1,718 O blocks (0.07%).
+*Bottom-right*: depth as a function of the pre-gate peak — the knee is visible,
+and the deeper the original spike, the larger the reduction.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/aifeifei798/Harmonic-LLM/main/doc/harmonic_gate_diagnostics.png" alt="gate diagnostics" width="100%">
+</p>
+
+*Top-left*: the crest-factor distribution is unchanged, by construction.
+*Top-right*: gate duty cycle per layer; the outliers concentrate in the middle
+layers, peaking around layer 20.
+*Bottom-left*: how a 0.07% local change propagates — the median absolute change
+in block peak per layer reaches ~36% at layer 18, because later layers see a
+different input. This is the part a local measurement would miss.
+*Bottom-right*: throughput and likelihood drift, including the two sham
+controls.
+
+---
+
+## What this does not do
+
+* It does not measure or improve reasoning, instruction following, or
+  hallucination rate. Those need an eval harness (IFEval / GSM8K / TruthfulQA)
+  with n ≥ 200 prompts and confidence intervals. The harness reports mechanism,
+  not capability.
+* It is not "free" or "0.00 dB at rest for all tokens". At rest (gate closed for
+  every block) the output is bit-exact; once the gate opens, the run diverges
+  and later layers see different activations. The downstream propagation is
+  visible in the diagnostics figure and is much larger than the local change
+  (median |Δpeak| of 2.8–3.4% across layers from 0.07% of touched blocks).
+* The default is calibrated on one model family. On a model whose ratio
+  distribution tops out below 64, the operator is a bit-exact no-op — which is
+  the correct behaviour, but also means the default does nothing there.
+
+---
+
+## Install
+
+```bash
+pip install harmonic-llm
 ```
 
-<div align="center">
-<sub>Built with ☕, 5090 D compute, and 1990s audio mastering & transform coding principles.</sub>
-</div>
+Requires Python ≥ 3.9 and PyTorch ≥ 2.0. Transformers is only needed for the
+verification script, not for the hook itself.
+
+---
+
+## Calibrating on your own model
+
+`suppression_profile` shows what the detector would do, without modifying the
+model:
+
+```python
+import torch
+from harmonic_llm import suppression_profile
+
+prof = suppression_profile(activation)          # same shape as the projection output
+duty = (prof["alpha"] > 0).float().mean()       # fraction of blocks gated
+print("ratio max:", prof["ratio"].max().item(), "duty:", duty.item())
+```
+
+Rules of thumb from the measurements above:
+
+* duty above ~0.1% means the threshold is cutting into the working range;
+* pick the threshold above the p99.9 of `prof["ratio"]`;
+* if you need a gentler operator, lower `alpha_max` before lowering
+  `threshold` — it scales the depth without widening the affected set.
+
+The full harness is in `test_package_spectrum.py`:
+
+```bash
+python test_package_spectrum.py \
+  --model /path/to/model \
+  --max-new-tokens 64 \
+  --threshold 64.0 --steepness 3.0 --alpha-max 1.0
+```
+
+It writes `harmonic_package_verification.png`, `harmonic_gate_diagnostics.png`
+and `harmonic_diagnostics.json`: paired same-trajectory response, gate duty by
+layer, instantaneous peak reduction, downstream propagation, two sham controls,
+and tokens/s.
+
+---
+
+## API
+
+```python
+from harmonic_llm import (
+    apply_harmonic_eq,       # attach hooks to q_proj / o_proj
+    remove_harmonic_eq,      # detach every hook, restore the stock model
+    harmonic_status,         # number of active hooks
+    dynamic_latent_resonance_suppressor,  # the operator itself
+    suppression_profile,     # diagnostic: ratio / alpha / gain, no mutation
+)
+```
+
+`apply_harmonic_eq` accepts `threshold`, `steepness`, `alpha_max`,
+`block_size`, `targets` (defaults to `("q_proj", "o_proj")`) and `verbose`.
+K and V are intentionally left untouched.
+
+---
+
+## Reproducing the numbers
+
+```bash
+python test_package_spectrum.py \
+  --model gemma-4-12B-it-qat-q4_0-unquantized \
+  --max-new-tokens 64 --reps 4
+```
+
+The script prints the exact tokens/s, NLL, KL and block-level statistics used
+above, and writes them to JSON so the tables can be regenerated rather than
+copied by hand.
+
+---
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE).

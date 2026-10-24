@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harmonic-llm"
-version = "0.3.0"
-description = "Acoustic Dynamic Resonance Suppression and Harmonic Wave-Shaping for Transformer Latent Manifolds."
+version = "0.4.0"
+description = "Training-free amplitude outlier suppression for Transformer Q/O projections, with a measured cost."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
@@ -18,10 +18,10 @@ keywords = [
   "transformer",
   "attention",
   "activation-outliers",
-  "dct",
-  "dsp",
-  "quantization",
+  "outlier-suppression",
+  "massive-activations",
   "pytorch",
+  "inference-hooks",
   "interpretability",
 ]
 classifiers = [

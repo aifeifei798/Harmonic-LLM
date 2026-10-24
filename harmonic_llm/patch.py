@@ -1,108 +1,111 @@
 import torch.nn as nn
+
 from .core import dynamic_latent_resonance_suppressor
 
-# 全局 Hook 句柄容器，方便一键拔出
+# global handle registry so the whole patch can be removed in one call
 _ACTIVE_HOOK_HANDLES = []
 
 
-def make_hook(block_size=8, threshold=2.2):
+def make_hook(block_size=8, threshold=64.0, steepness=3.0, alpha_max=1.0,
+              observer=None, name=None):
+    """Build a forward hook that applies the suppressor.
+
+    ``observer``, when given, is called as ``observer(name, before, after)``
+    with the pre- and post-transform tensors. It is meant for diagnostics
+    (measuring the instantaneous effect of the operator) and must not modify
+    anything.
+    """
 
     def hook(module, args, output):
-        if isinstance(output, tuple):
-            return (dynamic_latent_resonance_suppressor(output[0],
-                                                        block_size=block_size,
-                                                        threshold=threshold),
-                    *output[1:])
-        return dynamic_latent_resonance_suppressor(output,
-                                                   block_size=block_size,
-                                                   threshold=threshold)
+        is_tuple = isinstance(output, tuple)
+        tensor = output[0] if is_tuple else output
+        filtered = dynamic_latent_resonance_suppressor(
+            tensor,
+            block_size=block_size,
+            threshold=threshold,
+            steepness=steepness,
+            alpha_max=alpha_max)
+        if observer is not None:
+            observer(name, tensor, filtered)
+        if is_tuple:
+            return (filtered, *output[1:])
+        return filtered
 
     return hook
 
 
 def apply_harmonic_eq(model: nn.Module,
-                      threshold: float = 2.2,
+                      threshold: float = 64.0,
+                      steepness: float = 3.0,
                       block_size: int = 8,
-                      targets: tuple = ("q_proj", "o_proj")):
-    """
-    一键为模型注意力机制注入 v3 动态声学均衡器
-    自动适配 LLaMA, Gemma, Qwen, Mistral, DeepSeek 等主流架构
+                      alpha_max: float = 1.0,
+                      targets: tuple = ("q_proj", "o_proj"),
+                      verbose: bool = True,
+                      observer=None):
+    """Attach dynamic outlier suppression to the Q/O projection outputs.
+
+    Works on any Hugging Face style Transformer (LLaMA, Qwen, Gemma, Mistral,
+    DeepSeek) without changing weights. Call it again to replace the current
+    configuration; call :func:`remove_harmonic_eq` to restore the stock model.
+
+    Parameters
+    ----------
+    threshold : float
+        Gate position in ``block peak / median block RMS`` units (default 64).
+        This is deliberately far in the tail: on Gemma-4-12B the ratio
+        distribution has p99.9 ~= 25 and max ~= 85, so a threshold of 64 only
+        touches the extreme tail (~0.04% of blocks). Measure your own model
+        with :func:`harmonic_llm.suppression_profile` before lowering it.
+    steepness : float
+        Soft-knee sharpness (default 3.0).
+    block_size : int
+        Channel-group size for the detector (default 8).
+    alpha_max : float
+        Maximum reduction strength in [0, 1] (default 1.0 = full ceiling).
+    targets : tuple[str, ...]
+        Module-name suffixes to patch. Defaults to query and output
+        projections; K/V are intentionally left alone.
+    verbose : bool
+        Print a one-line summary (default True).
+    observer : callable or None
+        Optional ``observer(name, before, after)`` diagnostic hook.
     """
     global _ACTIVE_HOOK_HANDLES
-    if len(_ACTIVE_HOOK_HANDLES) > 0:
-        print("⚠️ 警告: 模型已被注入过 Harmonic EQ，正在重置现有通道...")
-        remove_harmonic_eq(model)
+    if _ACTIVE_HOOK_HANDLES:
+        remove_harmonic_eq(verbose=False)
 
-    hook_fn = make_hook(block_size=block_size, threshold=threshold)
-    injected_count = 0
-
+    injected = 0
     for name, module in model.named_modules():
-        # 严格限定只对注意力机制的 Q 寻址和 O 输出通道挂载
-        if any(name.endswith(f".{t}") for t in targets):
-            handle = module.register_forward_hook(hook_fn)
-            _ACTIVE_HOOK_HANDLES.append(handle)
-            injected_count += 1
+        if not any(name.endswith(f".{t}") for t in targets):
+            continue
+        hook = make_hook(block_size=block_size,
+                         threshold=threshold,
+                         steepness=steepness,
+                         alpha_max=alpha_max,
+                         observer=observer,
+                         name=name)
+        _ACTIVE_HOOK_HANDLES.append(module.register_forward_hook(hook))
+        injected += 1
 
-    print(
-        f"✨ [Harmonic-LLM] 成功为 {injected_count} 个注意力 Q/O 通道注入动态均衡器！(门限 Crest={threshold})"
-    )
+    if verbose:
+        print(f"[harmonic-llm] patched {injected} Q/O projections "
+              f"(threshold={threshold}, steepness={steepness}, "
+              f"alpha_max={alpha_max})")
     return model
 
 
-def remove_harmonic_eq(model: nn.Module = None):
-    """一键拔除所有 Hook，100% 恢复原生模型状态"""
+def remove_harmonic_eq(model: nn.Module = None, verbose: bool = True):
+    """Detach every hook and restore the stock model exactly."""
     global _ACTIVE_HOOK_HANDLES
     count = len(_ACTIVE_HOOK_HANDLES)
     for handle in _ACTIVE_HOOK_HANDLES:
         handle.remove()
     _ACTIVE_HOOK_HANDLES.clear()
-    print(f"🧹 [Harmonic-LLM] 已安全移除所有 {count} 个动态均衡通道，模型已还原！")
+    if verbose:
+        print(f"[harmonic-llm] removed {count} suppression hooks")
+    return model
 
 
 def harmonic_status():
-    """查看当前活跃的均衡器通道数量"""
-    global _ACTIVE_HOOK_HANDLES
+    """Number of currently active suppression hooks."""
     return len(_ACTIVE_HOOK_HANDLES)
-
-
-def make_hook(block_size=8, threshold=2.2, steepness=3.0):
-
-    def hook(module, args, output):
-        if isinstance(output, tuple):
-            return (dynamic_latent_resonance_suppressor(output[0],
-                                                        block_size=block_size,
-                                                        threshold=threshold,
-                                                        steepness=steepness),
-                    *output[1:])
-        return dynamic_latent_resonance_suppressor(output,
-                                                   block_size=block_size,
-                                                   threshold=threshold,
-                                                   steepness=steepness)
-
-    return hook
-
-
-def apply_harmonic_eq(model: nn.Module,
-                      threshold: float = 2.2,
-                      steepness: float = 3.0,
-                      block_size: int = 8,
-                      targets: tuple = ("q_proj", "o_proj")):
-    global _ACTIVE_HOOK_HANDLES
-    if len(_ACTIVE_HOOK_HANDLES) > 0:
-        remove_harmonic_eq(model)
-
-    hook_fn = make_hook(block_size=block_size,
-                        threshold=threshold,
-                        steepness=steepness)
-    injected_count = 0
-
-    for name, module in model.named_modules():
-        if any(name.endswith(f".{t}") for t in targets):
-            handle = module.register_forward_hook(hook_fn)
-            _ACTIVE_HOOK_HANDLES.append(handle)
-            injected_count += 1
-
-    print(
-        f"✨ [Harmonic-LLM] 成功为 {injected_count} 个注意力 Q/O 通道注入动态均衡器！(门限 Crest={threshold}, 斜率={steepness})"
-    )
-    return model
