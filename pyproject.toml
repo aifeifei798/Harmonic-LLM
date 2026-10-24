@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harmonic-llm"
+version = "0.3.0"
+authors = [
+  { name="aifeifei798" },
+]
+description = "Acoustic Dynamic Resonance Suppression and Harmonic Wave-Shaping for Transformer Latent Manifolds."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["harmonic_llm*"]
